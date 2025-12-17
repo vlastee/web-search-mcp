@@ -38,7 +38,7 @@ For extracting content from a specific webpage:
 
 ## Compatibility
 
-This MCP server has been developed and tested with **LM Studio** and **LibreChat**. It has not been tested with other MCP clients.
+This MCP server has been developed and tested with **LM Studio**, **LibreChat**, and **Continue**. It has not been tested with other MCP clients.
 
 ### Model Compatibility
 **Important:** Prioritise using more recent models designated for tool use. 
@@ -70,7 +70,20 @@ Older models (even those with tool use specified) may not work or may work errat
    This will create a `node_modules` folder with all required dependencies, install Playwright browsers, and build the project.
 
    **Note:** You must run `npm install` in the root of the extracted folder (not in `dist/`).
-4. Configure your `mcp.json` to point to the extracted `dist/index.js` file:
+
+   **Ubuntu 25.10 (Questing Quokka) Users:** If you encounter `libicu74` or `libxml2` not found errors, create compatibility symlinks:
+   ```bash
+   # Create libxml2 symlink
+   sudo ln -sf /usr/lib/x86_64-linux-gnu/libxml2.so.16 /usr/lib/x86_64-linux-gnu/libxml2.so.2
+   
+   # Create libicu symlinks
+   sudo ln -sf /usr/lib/x86_64-linux-gnu/libicuuc.so.76.1 /usr/lib/x86_64-linux-gnu/libicuuc.so.74
+   sudo ln -sf /usr/lib/x86_64-linux-gnu/libicui18n.so.76.1 /usr/lib/x86_64-linux-gnu/libicui18n.so.74
+   sudo ln -sf /usr/lib/x86_64-linux-gnu/libicudata.so.76.1 /usr/lib/x86_64-linux-gnu/libicudata.so.74
+   ```
+   Then retry `npx playwright install`.
+
+4. Configure your MCP client to point to the extracted `dist/index.js` file:
 
 ```json
 {
@@ -106,6 +119,46 @@ mcpServers:
     args:
     - /app/mcp/web-search-mcp/dist/index.js
     serverInstructions: true
+```
+
+### Continue Configuration
+
+Add to your Continue `config.json` (usually at `~/.continue/config.json`):
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "web-search",
+      "command": "node",
+      "args": [
+        "/path/to/web-search-mcp/dist/index.js"
+      ],
+      "env": {}
+    }
+  ]
+}
+```
+
+**Example Continue config with environment variables:**
+```json
+{
+  "mcpServers": [
+    {
+      "name": "web-search",
+      "command": "node",
+      "args": [
+        "/home/user/mcp-servers/web-search-mcp/dist/index.js"
+      ],
+      "env": {
+        "MAX_CONTENT_LENGTH": "10000",
+        "DEFAULT_TIMEOUT": "6000",
+        "MAX_BROWSERS": "3",
+        "BROWSER_HEADLESS": "true"
+      }
+    }
+  ]
+}
 ```
 
 **Troubleshooting:**

@@ -28,137 +28,128 @@ class WebSearchMCPServer {
   }
 
   private setupTools(): void {
-    // Register the main web search tool (primary choice for comprehensive searches)
-    this.server.tool(
-      'full-web-search',
-      'Search the web and fetch complete page content from top results. This is the most comprehensive web search tool. It searches the web and then follows the resulting links to extract their full page content, providing the most detailed and complete information available. Use get-web-search-summaries for a lightweight alternative.',
-      {
-        query: z.string().describe('Search query to execute (recommended for comprehensive research)'),
-        limit: z.union([z.number(), z.string()]).transform((val) => {
-          const num = typeof val === 'string' ? parseInt(val, 10) : val;
-          if (isNaN(num) || num < 1 || num > 10) {
-            throw new Error('Invalid limit: must be a number between 1 and 10');
-          }
-          return num;
-        }).default(5).describe('Number of results to return with full content (1-10)'),
-        includeContent: z.union([z.boolean(), z.string()]).transform((val) => {
-          if (typeof val === 'string') {
-            return val.toLowerCase() === 'true';
-          }
-          return Boolean(val);
-        }).default(true).describe('Whether to fetch full page content (default: true)'),
-        maxContentLength: z.union([z.number(), z.string()]).transform((val) => {
-          const num = typeof val === 'string' ? parseInt(val, 10) : val;
-          if (isNaN(num) || num < 0) {
-            throw new Error('Invalid maxContentLength: must be a non-negative number');
-          }
-          return num;
-        }).optional().describe('Maximum characters per result content (0 = no limit). Usually not needed - content length is automatically optimized.'),
-      },
-      async (args: unknown) => {
-        console.log(`[MCP] Tool call received: full-web-search`);
-        console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+    // Type definition to work around TypeScript deep instantiation issue with MCP SDK + Zod
+    type RegisterToolFn = (
+      name: string,
+      config: { description: string; inputSchema: Record<string, unknown> },
+      handler: (args: unknown) => Promise<unknown>
+    ) => unknown;
 
-        try {
-          // Convert and validate arguments
-          const validatedArgs = this.validateAndConvertArgs(args);
-          
-          // Auto-detect model types based on parameter formats
-          // Llama models often send string parameters and struggle with large responses
-          const isLikelyLlama = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as Record<string, unknown>).limit === 'string') ||
-            ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'string')
-          );
-          
-          // Detect models that handle large responses well (Qwen, Gemma, recent Deepseek)
-          const isLikelyRobustModel = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as Record<string, unknown>).limit === 'number') &&
-            ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'boolean')
-          );
-          
-          // Only apply auto-limit if maxContentLength is not explicitly set (including 0)
-          const hasExplicitMaxLength = typeof args === 'object' && args !== null && 'maxContentLength' in args;
-          
-          if (!hasExplicitMaxLength && isLikelyLlama) {
-            console.log(`[MCP] Detected potential Llama model (string parameters), applying content length limit`);
-            validatedArgs.maxContentLength = 2000; // Reasonable limit for Llama
-          }
-          
-          // For robust models (Qwen, Gemma, recent Deepseek), remove maxContentLength if it's set to a low value
-          if (isLikelyRobustModel && validatedArgs.maxContentLength && validatedArgs.maxContentLength < 5000) {
-            console.log(`[MCP] Detected robust model (numeric parameters), removing unnecessary content length limit`);
-            validatedArgs.maxContentLength = undefined;
-          }
-          
-          console.log(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
-          
-          console.log(`[MCP] Starting web search...`);
-          const result = await this.handleWebSearch(validatedArgs);
-          
-          console.log(`[MCP] Search completed, found ${result.results.length} results`);
-          
-          // Format the results as a comprehensive text response
-          let responseText = `Search completed for "${result.query}" with ${result.total_results} results:\n\n`;
-          
-          // Add status line if available
-          if (result.status) {
-            responseText += `**Status:** ${result.status}\n\n`;
-          }
-          
-          const maxLength = validatedArgs.maxContentLength;
-          
-          result.results.forEach((searchResult, idx) => {
-            responseText += `**${idx + 1}. ${searchResult.title}**\n`;
-            responseText += `URL: ${searchResult.url}\n`;
-            responseText += `Description: ${searchResult.description}\n`;
-            
-            if (searchResult.fullContent && searchResult.fullContent.trim()) {
-              let content = searchResult.fullContent;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
-              }
-              responseText += `\n**Full Content:**\n${content}\n`;
-            } else if (searchResult.contentPreview && searchResult.contentPreview.trim()) {
-              let content = searchResult.contentPreview;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
-              }
-              responseText += `\n**Content Preview:**\n${content}\n`;
-            } else if (searchResult.fetchStatus === 'error') {
-              responseText += `\n**Content Extraction Failed:** ${searchResult.error}\n`;
-            }
-            
-            responseText += `\n---\n\n`;
-          });
-          
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: responseText,
-              },
-            ],
-          };
-        } catch (error) {
-          console.error(`[MCP] Error in tool handler:`, error);
-          throw error;
+    // Handler functions
+    const fullWebSearchHandler = async (args: unknown) => {
+      console.log(`[MCP] Tool call received: full-web-search`);
+      console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+
+      try {
+        // Convert and validate arguments
+        const validatedArgs = this.validateAndConvertArgs(args);
+        
+        // Auto-detect model types based on parameter formats
+        // Llama models often send string parameters and struggle with large responses
+        const isLikelyLlama = typeof args === 'object' && args !== null && (
+          ('limit' in args && typeof (args as Record<string, unknown>).limit === 'string') ||
+          ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'string')
+        );
+        
+        // Detect models that handle large responses well (Qwen, Gemma, recent Deepseek)
+        const isLikelyRobustModel = typeof args === 'object' && args !== null && (
+          ('limit' in args && typeof (args as Record<string, unknown>).limit === 'number') &&
+          ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'boolean')
+        );
+        
+        // Only apply auto-limit if maxContentLength is not explicitly set (including 0)
+        const hasExplicitMaxLength = typeof args === 'object' && args !== null && 'maxContentLength' in args;
+        
+        if (!hasExplicitMaxLength && isLikelyLlama) {
+          console.log(`[MCP] Detected potential Llama model (string parameters), applying content length limit`);
+          validatedArgs.maxContentLength = 2000; // Reasonable limit for Llama
         }
+        
+        // For robust models (Qwen, Gemma, recent Deepseek), remove maxContentLength if it's set to a low value
+        if (isLikelyRobustModel && validatedArgs.maxContentLength && validatedArgs.maxContentLength < 5000) {
+          console.log(`[MCP] Detected robust model (numeric parameters), removing unnecessary content length limit`);
+          validatedArgs.maxContentLength = undefined;
+        }
+        
+        console.log(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
+        
+        console.log(`[MCP] Starting web search...`);
+        const result = await this.handleWebSearch(validatedArgs);
+        
+        console.log(`[MCP] Search completed, found ${result.results.length} results`);
+        
+        // Format the results as a comprehensive text response
+        let responseText = `Search completed for "${result.query}" with ${result.total_results} results:\n\n`;
+        
+        // Add status line if available
+        if (result.status) {
+          responseText += `**Status:** ${result.status}\n\n`;
+        }
+        
+        const maxLength = validatedArgs.maxContentLength;
+        
+        result.results.forEach((searchResult, idx) => {
+          responseText += `**${idx + 1}. ${searchResult.title}**\n`;
+          responseText += `URL: ${searchResult.url}\n`;
+          responseText += `Description: ${searchResult.description}\n`;
+          
+          if (searchResult.fullContent && searchResult.fullContent.trim()) {
+            let content = searchResult.fullContent;
+            if (maxLength && maxLength > 0 && content.length > maxLength) {
+              content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
+            }
+            responseText += `\n**Full Content:**\n${content}\n`;
+          } else if (searchResult.contentPreview && searchResult.contentPreview.trim()) {
+            let content = searchResult.contentPreview;
+            if (maxLength && maxLength > 0 && content.length > maxLength) {
+              content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
+            }
+            responseText += `\n**Content Preview:**\n${content}\n`;
+          } else if (searchResult.fetchStatus === 'error') {
+            responseText += `\n**Content Extraction Failed:** ${searchResult.error}\n`;
+          }
+          
+          responseText += `\n---\n\n`;
+        });
+        
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: responseText,
+            },
+          ],
+        };
+      } catch (error) {
+        console.error(`[MCP] Error in tool handler:`, error);
+        throw error;
       }
+    };
+
+    // Register the main web search tool (primary choice for comprehensive searches)
+    (this.server.registerTool as RegisterToolFn)(
+      'full-web-search',
+      {
+        description: 'Search the web and fetch complete page content from top results. This is the most comprehensive web search tool. It searches the web and then follows the resulting links to extract their full page content, providing the most detailed and complete information available. Use get-web-search-summaries for a lightweight alternative.',
+        inputSchema: {
+          query: z.string().describe('Search query to execute (recommended for comprehensive research)'),
+          limit: z.number().optional().describe('Number of results to return with full content (1-10)'),
+          includeContent: z.boolean().optional().describe('Whether to fetch full page content (default: true)'),
+          maxContentLength: z.number().optional().describe('Maximum characters per result content (0 = no limit). Usually not needed - content length is automatically optimized.'),
+        },
+      },
+      fullWebSearchHandler
     );
 
     // Register the lightweight web search summaries tool (secondary choice for quick results)
-    this.server.tool(
+    (this.server.registerTool as RegisterToolFn)(
       'get-web-search-summaries',
-      'Search the web and return only the search result snippets/descriptions without following links to extract full page content. This is a lightweight alternative to full-web-search for when you only need brief search results. For comprehensive information, use full-web-search instead.',
       {
-        query: z.string().describe('Search query to execute (lightweight alternative)'),
-        limit: z.union([z.number(), z.string()]).transform((val) => {
-          const num = typeof val === 'string' ? parseInt(val, 10) : val;
-          if (isNaN(num) || num < 1 || num > 10) {
-            throw new Error('Invalid limit: must be a number between 1 and 10');
-          }
-          return num;
-        }).default(5).describe('Number of search results to return (1-10)'),
+        description: 'Search the web and return only the search result snippets/descriptions without following links to extract full page content. This is a lightweight alternative to full-web-search for when you only need brief search results. For comprehensive information, use full-web-search instead.',
+        inputSchema: {
+          query: z.string().describe('Search query to execute (lightweight alternative)'),
+          limit: z.number().optional().describe('Number of search results to return (1-10)'),
+        },
       },
       async (args: unknown) => {
         console.log(`[MCP] Tool call received: get-web-search-summaries`);
@@ -240,18 +231,14 @@ class WebSearchMCPServer {
     );
 
     // Register the single page content extraction tool
-    this.server.tool(
+    (this.server.registerTool as RegisterToolFn)(
       'get-single-web-page-content',
-      'Extract and return the full content from a single web page URL. This tool follows a provided URL and extracts the main page content. Useful for getting detailed content from a specific webpage without performing a search.',
       {
-        url: z.string().url().describe('The URL of the web page to extract content from'),
-        maxContentLength: z.union([z.number(), z.string()]).transform((val) => {
-          const num = typeof val === 'string' ? parseInt(val, 10) : val;
-          if (isNaN(num) || num < 0) {
-            throw new Error('Invalid maxContentLength: must be a non-negative number');
-          }
-          return num;
-        }).optional().describe('Maximum characters for the extracted content (0 = no limit, undefined = use default limit). Usually not needed - content length is automatically optimized.'),
+        description: 'Extract and return the full content from a single web page URL. This tool follows a provided URL and extracts the main page content. Useful for getting detailed content from a specific webpage without performing a search.',
+        inputSchema: {
+          url: z.string().url().describe('The URL of the web page to extract content from'),
+          maxContentLength: z.number().optional().describe('Maximum characters for the extracted content (0 = no limit, undefined = use default limit). Usually not needed - content length is automatically optimized.'),
+        },
       },
       async (args: unknown) => {
         console.log(`[MCP] Tool call received: get-single-web-page-content`);
